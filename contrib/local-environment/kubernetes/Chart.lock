@@ -1,15 +1,15 @@
 dependencies:
 - name: dex
   repository: https://charts.dexidp.io
-  version: 0.20.0
+  version: 0.23.0
 - name: oauth2-proxy
   repository: https://oauth2-proxy.github.io/manifests
-  version: 7.11.0
+  version: 7.12.0
 - name: httpbin
   repository: https://conservis.github.io/helm-charts
   version: 1.1.0
 - name: hello-world
   repository: https://conservis.github.io/helm-charts
   version: 1.1.0
-digest: sha256:3eb75b01f28d2921057e1d7a50a25a221d6f9e1474d3ee1ea9907be54dade0ca
-generated: "2025-08-21T18:40:35.245388+03:00"
+digest: sha256:9b18e072db6863053c2967d023929ab4b9c03b6bd84f6529d90fe7a9ec5e315f
+generated: "2025-07-20T08:56:43.559585022Z"
