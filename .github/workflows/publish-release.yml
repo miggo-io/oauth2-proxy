@@ -84,8 +84,11 @@ jobs:
 
   docker:
     needs: publish
+    strategy:
+      matrix:
+        environment: [dev, production]
     runs-on: ubuntu-latest
-    environment: "production"
+    environment: ${{ matrix.environment }}
     steps:
       - name: Check out code
         uses: actions/checkout@v5
@@ -113,12 +116,12 @@ jobs:
         with:
           mask-password: 'true'
 
-      - name: Build images
+      - name: Build and push (${{ matrix.environment }})
         run: make build-docker-all
         env:
-          REGISTRY: ${{ vars.ECR_REGISTRY }}
+          REGISTRY: ${{ steps.ecr_login.outputs.registry }}
 
-      - name: Push images
+      - name: Push images (${{ matrix.environment }})
         run: make push-docker-all
         env:
-          REGISTRY: ${{ vars.ECR_REGISTRY }}
+          REGISTRY: ${{ steps.ecr_login.outputs.registry }}
