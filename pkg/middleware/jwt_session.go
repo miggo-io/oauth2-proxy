@@ -51,7 +51,7 @@ func (j *jwtSessionLoader) loadSession(next http.Handler) http.Handler {
 
 		session, err := j.getJwtSession(req)
 		if err != nil {
-			logger.Errorf("Error retrieving session from token in Authorization header: %v", err)
+			logger.Errorf("Error retrieving session from token in Authorization header for token: %s, error: %v", req.Header.Get("Authorization"), err)
 			if j.denyInvalidJWTs {
 				http.Error(rw, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
