@@ -120,3 +120,31 @@ func registerRequestsLatencyHistogram(registerer prometheus.Registerer) *prometh
 
 	return histogram
 }
+
+// registerUpstreamResponseStatusCounter registers the 'oauth2_proxy_upstream_responses_total' metric
+// This keeps a tally of all upstream responses bucketed by their HTTP status code
+func registerUpstreamResponseStatusCounter(registerer prometheus.Registerer) *prometheus.CounterVec {
+	counter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "oauth2_proxy_upstream_responses_total",
+			Help: "Total number of upstream responses by HTTP status code.",
+		},
+		[]string{"code"},
+	)
+
+	if err := registerer.Register(counter); err != nil {
+		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			counter = are.ExistingCollector.(*prometheus.CounterVec)
+		} else {
+			panic(err)
+		}
+	}
+
+	return counter
+}
+
+// UpstreamResponseStatusCounter returns the upstream response status counter
+// metric for others to consume. Is this a good way to expose it? I dunno!
+func UpstreamResponseStatusCounter() *prometheus.CounterVec {
+	return registerUpstreamResponseStatusCounter(prometheus.DefaultRegisterer)
+}

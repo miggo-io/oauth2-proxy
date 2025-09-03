@@ -59,6 +59,7 @@ type Options struct {
 	SkipAuthRegex            []string `flag:"skip-auth-regex" cfg:"skip_auth_regex"`
 	SkipAuthRoutes           []string `flag:"skip-auth-route" cfg:"skip_auth_routes"`
 	SkipJwtBearerTokens      bool     `flag:"skip-jwt-bearer-tokens" cfg:"skip_jwt_bearer_tokens"`
+	OverwriteUpstreamStatus  int      `flag:"overwrite-upstream-status" cfg:"overwrite_upstream_status"`
 	BearerTokenLoginFallback bool     `flag:"bearer-token-login-fallback" cfg:"bearer_token_login_fallback"`
 	ExtraJwtIssuers          []string `flag:"extra-jwt-issuers" cfg:"extra_jwt_issuers"`
 	SkipProviderButton       bool     `flag:"skip-provider-button" cfg:"skip_provider_button"`
@@ -134,6 +135,7 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.Bool("ssl-insecure-skip-verify", false, "skip validation of certificates presented when using HTTPS providers")
 	flagSet.Bool("skip-jwt-bearer-tokens", false, "will skip requests that have verified JWT bearer tokens (default false)")
 	flagSet.Bool("bearer-token-login-fallback", true, "if skip-jwt-bearer-tokens is set, fall back to normal login redirect with an invalid JWT. If false, 403 instead")
+	flagSet.Int("overwrite-upstream-status", 0, "overwrite upstream response status codes to specified value (0 = disabled, 200 = OK, etc.)")
 	flagSet.Bool("force-json-errors", false, "will force JSON errors instead of HTTP error pages or redirects")
 	flagSet.Bool("encode-state", false, "will encode oauth state with base64")
 	flagSet.Bool("allow-query-semicolons", false, "allow the use of semicolons in query args")

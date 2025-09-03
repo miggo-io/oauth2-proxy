@@ -82,23 +82,24 @@ type OAuthProxy struct {
 
 	SignInPath string
 
-	allowedRoutes        []allowedRoute
-	apiRoutes            []apiRoute
-	redirectURL          *url.URL // the url to receive requests at
-	relativeRedirectURL  bool
-	whitelistDomains     []string
-	provider             providers.Provider
-	sessionStore         sessionsapi.SessionStore
-	ProxyPrefix          string
-	basicAuthValidator   basic.Validator
-	basicAuthGroups      []string
-	SkipProviderButton   bool
-	skipAuthPreflight    bool
-	skipJwtBearerTokens  bool
-	forceJSONErrors      bool
-	allowQuerySemicolons bool
-	realClientIPParser   ipapi.RealClientIPParser
-	trustedIPs           *ip.NetSet
+	allowedRoutes           []allowedRoute
+	apiRoutes               []apiRoute
+	redirectURL             *url.URL // the url to receive requests at
+	relativeRedirectURL     bool
+	whitelistDomains        []string
+	provider                providers.Provider
+	sessionStore            sessionsapi.SessionStore
+	ProxyPrefix             string
+	basicAuthValidator      basic.Validator
+	basicAuthGroups         []string
+	SkipProviderButton      bool
+	skipAuthPreflight       bool
+	skipJwtBearerTokens     bool
+	overwriteUpstreamStatus int
+	forceJSONErrors         bool
+	allowQuerySemicolons    bool
+	realClientIPParser      ipapi.RealClientIPParser
+	trustedIPs              *ip.NetSet
 
 	sessionChain      alice.Chain
 	headersChain      alice.Chain
@@ -219,21 +220,22 @@ func NewOAuthProxy(ctx context.Context, opts *options.Options, validator func(st
 
 		SignInPath: fmt.Sprintf("%s/sign_in", opts.ProxyPrefix),
 
-		ProxyPrefix:          opts.ProxyPrefix,
-		provider:             provider,
-		sessionStore:         sessionStore,
-		redirectURL:          redirectURL,
-		relativeRedirectURL:  opts.RelativeRedirectURL,
-		apiRoutes:            apiRoutes,
-		allowedRoutes:        allowedRoutes,
-		whitelistDomains:     opts.WhitelistDomains,
-		skipAuthPreflight:    opts.SkipAuthPreflight,
-		skipJwtBearerTokens:  opts.SkipJwtBearerTokens,
-		realClientIPParser:   opts.GetRealClientIPParser(),
-		SkipProviderButton:   opts.SkipProviderButton,
-		forceJSONErrors:      opts.ForceJSONErrors,
-		allowQuerySemicolons: opts.AllowQuerySemicolons,
-		trustedIPs:           trustedIPs,
+		ProxyPrefix:             opts.ProxyPrefix,
+		provider:                provider,
+		sessionStore:            sessionStore,
+		redirectURL:             redirectURL,
+		relativeRedirectURL:     opts.RelativeRedirectURL,
+		apiRoutes:               apiRoutes,
+		allowedRoutes:           allowedRoutes,
+		whitelistDomains:        opts.WhitelistDomains,
+		skipAuthPreflight:       opts.SkipAuthPreflight,
+		skipJwtBearerTokens:     opts.SkipJwtBearerTokens,
+		overwriteUpstreamStatus: opts.OverwriteUpstreamStatus,
+		realClientIPParser:      opts.GetRealClientIPParser(),
+		SkipProviderButton:      opts.SkipProviderButton,
+		forceJSONErrors:         opts.ForceJSONErrors,
+		allowQuerySemicolons:    opts.AllowQuerySemicolons,
+		trustedIPs:              trustedIPs,
 
 		basicAuthValidator: basicAuthValidator,
 		basicAuthGroups:    opts.HtpasswdUserGroups,
@@ -995,6 +997,38 @@ func (p *OAuthProxy) AuthOnly(rw http.ResponseWriter, req *http.Request) {
 	})).ServeHTTP(rw, req)
 }
 
+// Overwrite response code
+type responseCodeOverwriteWriter struct {
+	http.ResponseWriter
+	request      *http.Request
+	written      bool
+	targetStatus int
+}
+
+func (crw *responseCodeOverwriteWriter) WriteHeader(code int) {
+	// TODO: Ideally, another custom writer would have incremented the status. Make
+	// sure to have this wrapper execute *after* the counter though -
+	// otherwise you'll count the altered status codes
+	middleware.UpstreamResponseStatusCounter().WithLabelValues(fmt.Sprintf("%d", code)).Inc()
+
+	if code != crw.targetStatus {
+		logger.Errorf("requestCodeOverwriteWriter: overwriting status code %d -> %d for [ %s%s ]", code, crw.targetStatus, crw.request.Host, crw.request.URL.Path)
+	}
+
+	crw.written = true
+	crw.ResponseWriter.WriteHeader(crw.targetStatus)
+}
+
+func (crw *responseCodeOverwriteWriter) Write(b []byte) (int, error) {
+	if !crw.written {
+		logger.Errorf("requestCodeOverwriteWriter: overwriting status code ?? -> %d for [ %s%s ]", crw.targetStatus, crw.request.Host, crw.request.URL.Path)
+		crw.written = true
+		crw.WriteHeader(crw.targetStatus)
+	}
+
+	return crw.ResponseWriter.Write(b)
+}
+
 // Proxy proxies the user request if the user is authenticated else it prompts
 // them to authenticate
 func (p *OAuthProxy) Proxy(rw http.ResponseWriter, req *http.Request) {
@@ -1003,7 +1037,15 @@ func (p *OAuthProxy) Proxy(rw http.ResponseWriter, req *http.Request) {
 	case nil:
 		// we are authenticated
 		p.addHeadersForProxying(rw, session)
-		p.headersChain.Then(p.upstreamProxy).ServeHTTP(rw, req)
+		p.headersChain.Then(http.HandlerFunc(func(rw http.ResponseWriter, innerReq *http.Request) {
+			customRW := rw
+
+			if p.overwriteUpstreamStatus > 0 {
+				customRW = &responseCodeOverwriteWriter{ResponseWriter: rw, request: innerReq, targetStatus: p.overwriteUpstreamStatus}
+			}
+
+			p.upstreamProxy.ServeHTTP(customRW, innerReq)
+		})).ServeHTTP(rw, req)
 	case ErrNeedsLogin:
 		// we need to send the user to a login screen
 		if p.forceJSONErrors || isAjax(req) || p.isAPIPath(req) {

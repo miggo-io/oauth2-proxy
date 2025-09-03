@@ -3467,3 +3467,189 @@ func TestGetOAuthRedirectURI(t *testing.T) {
 		})
 	}
 }
+
+func TestResponseCodeOverwriteWriter(t *testing.T) {
+	t.Run("overwrites different error status codes", func(t *testing.T) {
+		// Test various error status codes
+		testCases := []int{
+			http.StatusBadRequest,          // 400
+			http.StatusUnauthorized,        // 401
+			http.StatusForbidden,           // 403
+			http.StatusNotFound,            // 404
+			http.StatusInternalServerError, // 500
+			http.StatusBadGateway,          // 502
+			http.StatusServiceUnavailable,  // 503
+		}
+
+		for _, statusCode := range testCases {
+			t.Run(fmt.Sprintf("status_%d", statusCode), func(t *testing.T) {
+				recorder := httptest.NewRecorder()
+				customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+
+				customRW.WriteHeader(statusCode)
+				assert.Equal(t, http.StatusOK, recorder.Code,
+					fmt.Sprintf("Status %d should be overwritten to 200", statusCode))
+			})
+		}
+	})
+
+	t.Run("handles multiple Write calls correctly", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+
+		// First write should call WriteHeader(200)
+		_, err := customRW.Write([]byte("first"))
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, recorder.Code, "First Write should set status to 200")
+
+		// Second write should not change status
+		_, err = customRW.Write([]byte("second"))
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, recorder.Code, "Second Write should keep status as 200")
+
+		// Body should contain both writes
+		assert.Equal(t, "firstsecond", recorder.Body.String(), "Body should contain all written content")
+	})
+
+	t.Run("handles empty Write calls", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+
+		// Write empty bytes
+		_, err := customRW.Write([]byte{})
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, recorder.Code, "Empty Write should still set status to 200")
+		assert.Equal(t, "", recorder.Body.String(), "Body should be empty")
+	})
+}
+
+func TestProxyOverwriteUpstreamStatus(t *testing.T) {
+	tests := []struct {
+		name            string
+		upstreamStatus  int
+		upstreamBody    string
+		expectStatus    int
+		expectBody      string
+		overwriteStatus int
+	}{
+		{
+			name:            "already returns 200",
+			upstreamStatus:  http.StatusOK,
+			upstreamBody:    "Success",
+			expectStatus:    http.StatusOK, // Should remain 200
+			expectBody:      "Success",
+			overwriteStatus: 200,
+		},
+		{
+			name:            "naked 503 page",
+			upstreamStatus:  http.StatusServiceUnavailable,
+			upstreamBody:    "",
+			expectStatus:    200, // Should be overwritten to 200
+			expectBody:      "",
+			overwriteStatus: 200,
+		},
+		{
+			name:            "503 page with content",
+			upstreamStatus:  http.StatusServiceUnavailable,
+			upstreamBody:    "Service temporarily unavailable",
+			expectStatus:    200, // Should be overwritten to 200
+			expectBody:      "Service temporarily unavailable",
+			overwriteStatus: 200,
+		},
+		{
+			name:            "503 page with content - overwrite disabled",
+			upstreamStatus:  http.StatusServiceUnavailable,
+			upstreamBody:    "Service temporarily unavailable",
+			expectStatus:    http.StatusServiceUnavailable, // Should remain 503
+			expectBody:      "Service temporarily unavailable",
+			overwriteStatus: 0,
+		},
+		{
+			name:            "404 page overwritten to 418 (I'm a teapot)",
+			upstreamStatus:  http.StatusNotFound,
+			upstreamBody:    "Not Found",
+			expectStatus:    418, // Should be overwritten to 418
+			expectBody:      "Not Found",
+			overwriteStatus: 418,
+		},
+		{
+			name:            "500 page overwritten to 202 (Accepted)",
+			upstreamStatus:  http.StatusInternalServerError,
+			upstreamBody:    "Internal Server Error",
+			expectStatus:    202, // Should be overwritten to 202
+			expectBody:      "Internal Server Error",
+			overwriteStatus: 202,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock upstream server that returns the specified status and body
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.upstreamStatus)
+				if tt.upstreamBody != "" {
+					w.Write([]byte(tt.upstreamBody))
+				}
+			}))
+			t.Cleanup(upstreamServer.Close)
+
+			// Create test options with overwriteUpstreamStatus setting
+			opts := baseTestOptions()
+			opts.OverwriteUpstreamStatus = tt.overwriteStatus
+			opts.UpstreamServers = options.UpstreamConfig{
+				Upstreams: []options.Upstream{
+					{
+						ID:   upstreamServer.URL,
+						Path: "/",
+						URI:  upstreamServer.URL,
+					},
+				},
+			}
+
+			// Set Cookie.Refresh to create proxy.AesCipher (needed for access_token encryption)
+			opts.Cookie.Refresh = time.Hour
+
+			// Validate options before creating proxy
+			err := validation.Validate(opts)
+			require.NoError(t, err)
+
+			// Create the proxy
+			proxy, err := NewOAuthProxy(context.Background(), opts, func(email string) bool { return true })
+			require.NoError(t, err)
+
+			// Verify the flag is set correctly
+			assert.Equal(t, tt.overwriteStatus, proxy.overwriteUpstreamStatus,
+				fmt.Sprintf("overwriteUpstreamStatus should be %d for test case: %s", tt.overwriteStatus, tt.name))
+
+			// Create a mock session and save it to bypass OAuth flow
+			created := time.Now()
+			session := &sessions.SessionState{
+				User:        "testuser",
+				Email:       "test@example.com",
+				AccessToken: "test-token",
+				CreatedAt:   &created,
+			}
+
+			// Create a test request and response
+			req := httptest.NewRequest("GET", "/", nil)
+			rw := httptest.NewRecorder()
+
+			// Save the session to get a valid cookie
+			err = proxy.sessionStore.Save(rw, req, session)
+			require.NoError(t, err)
+
+			// Extract the cookie and add it to our test request
+			cookie := rw.Header().Values("Set-Cookie")[0]
+			req.Header.Set("Cookie", cookie)
+
+			// Now test the actual proxy call
+			proxy.ServeHTTP(rw, req)
+
+			// Validate the response
+			assert.Equal(t, tt.expectStatus, rw.Code,
+				fmt.Sprintf("Status should be %d for test case: %s", tt.expectStatus, tt.name))
+			assert.Equal(t, tt.expectBody, rw.Body.String(),
+				fmt.Sprintf("Body should match for test case: %s", tt.name))
+		})
+	}
+}
