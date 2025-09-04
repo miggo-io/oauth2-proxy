@@ -3484,7 +3484,8 @@ func TestResponseCodeOverwriteWriter(t *testing.T) {
 		for _, statusCode := range testCases {
 			t.Run(fmt.Sprintf("status_%d", statusCode), func(t *testing.T) {
 				recorder := httptest.NewRecorder()
-				customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+				req := httptest.NewRequest("GET", "/test", nil)
+				customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, request: req, targetStatus: http.StatusOK}
 
 				customRW.WriteHeader(statusCode)
 				assert.Equal(t, http.StatusOK, recorder.Code,
@@ -3495,7 +3496,8 @@ func TestResponseCodeOverwriteWriter(t *testing.T) {
 
 	t.Run("handles multiple Write calls correctly", func(t *testing.T) {
 		recorder := httptest.NewRecorder()
-		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+		req := httptest.NewRequest("GET", "/test", nil)
+		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, request: req, targetStatus: http.StatusOK}
 
 		// First write should call WriteHeader(200)
 		_, err := customRW.Write([]byte("first"))
@@ -3513,7 +3515,8 @@ func TestResponseCodeOverwriteWriter(t *testing.T) {
 
 	t.Run("handles empty Write calls", func(t *testing.T) {
 		recorder := httptest.NewRecorder()
-		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, targetStatus: http.StatusOK}
+		req := httptest.NewRequest("GET", "/test", nil)
+		customRW := &responseCodeOverwriteWriter{ResponseWriter: recorder, request: req, targetStatus: http.StatusOK}
 
 		// Write empty bytes
 		_, err := customRW.Write([]byte{})
