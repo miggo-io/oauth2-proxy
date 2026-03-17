@@ -24,12 +24,13 @@ func NewReadynessCheck(ctx context.Context, path string, verifiable Verifiable) 
 
 func readynessCheck(ctx context.Context, path string, verifiable Verifiable, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if ctx.Err() != nil {
-			rw.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(rw, "Shutting down")
-			return
-		}
 		if path != "" && req.URL.EscapedPath() == path {
+			if ctx.Err() != nil {
+				rw.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(rw, "Shutting down")
+				return
+			}
+
 			if err := verifiable.VerifyConnection(req.Context()); err != nil {
 				rw.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprintf(rw, "error: %v", err)
