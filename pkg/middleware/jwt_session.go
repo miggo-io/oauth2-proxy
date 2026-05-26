@@ -58,6 +58,15 @@ func (j *jwtSessionLoader) loadSession(next http.Handler) http.Handler {
 			}
 		}
 
+		if session != nil {
+			// Log validated JWT identity so M2M requests can be correlated back
+			// to the originating Descope access key. session.User is populated
+			// from the JWT 'sub' claim by the OIDC verifier (CreateTokenToSessionFunc)
+			// — no manual decoding needed (MIG-11558).
+			logger.Printf("jwt session loaded: key_id=%s path=%s exp=%v",
+				session.User, req.URL.Path, session.ExpiresOn)
+		}
+
 		// Add the session to the scope if it was found
 		scope.Session = session
 		next.ServeHTTP(rw, req)
