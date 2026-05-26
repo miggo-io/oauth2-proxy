@@ -1,10 +1,13 @@
 package middleware
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"strings"
 
 	"github.com/justinas/alice"
 	middlewareapi "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/apis/middleware"
@@ -51,7 +54,15 @@ func (j *jwtSessionLoader) loadSession(next http.Handler) http.Handler {
 
 		session, err := j.getJwtSession(req)
 		if err != nil {
-			logger.Errorf("Error retrieving session from token for endpoint: %s, in Authorization header for token: %s, error: %v", req.URL.Path, req.Header.Get("Authorization"), err)
+			// Decode the JWT payload without verifying the signature so we can log
+			// identifying metadata (key_id=sub, iss, aud, exp) instead of the raw
+			// Bearer token value. The claims are untrusted when the signature has
+			// failed validation, but they still give triage signal (e.g., expired
+			// token from a known key vs. completely malformed request) without
+			// leaking a replayable secret into logs (MIG-11558).
+			c := j.unverifiedClaimsFromHeader(req.Header.Get("Authorization"))
+			logger.Errorf("Error retrieving session from token for endpoint: %s, key_id=%s iss=%s aud=%s exp=%d error=%v",
+				req.URL.Path, c.sub, c.iss, c.aud, c.exp, err)
 			if j.denyInvalidJWTs {
 				http.Error(rw, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
@@ -131,4 +142,65 @@ func (j *jwtSessionLoader) getBasicToken(token string) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid basic auth token found in authorization header")
+}
+
+// unverifiedClaims holds JWT claims read without verifying the signature.
+// Used for logging only — values are not trusted for authorization decisions.
+type unverifiedClaims struct {
+	sub string
+	iss string
+	aud string
+	exp int64
+}
+
+// unverifiedClaimsFromHeader extracts and base64-decodes the JWT payload from
+// an Authorization header without verifying the signature. Returns zero-valued
+// fields if the header is empty, the token is not a JWT, or decoding fails.
+func (j *jwtSessionLoader) unverifiedClaimsFromHeader(authHeader string) unverifiedClaims {
+	var c unverifiedClaims
+	if authHeader == "" {
+		return c
+	}
+	token, err := j.findTokenFromHeader(authHeader)
+	if err != nil || token == "" {
+		return c
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return c
+	}
+	// JWTs use base64url; payload may or may not be padded. Try raw first, then
+	// padded as a fallback.
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		payload, err = base64.URLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return c
+		}
+	}
+	var raw struct {
+		Sub string          `json:"sub"`
+		Iss string          `json:"iss"`
+		Aud json.RawMessage `json:"aud"` // can be string or []string per RFC 7519
+		Exp int64           `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return c
+	}
+	c.sub = raw.Sub
+	c.iss = raw.Iss
+	c.exp = raw.Exp
+	// aud may be either a string or an array of strings.
+	if len(raw.Aud) > 0 {
+		var s string
+		if err := json.Unmarshal(raw.Aud, &s); err == nil {
+			c.aud = s
+		} else {
+			var arr []string
+			if err := json.Unmarshal(raw.Aud, &arr); err == nil && len(arr) > 0 {
+				c.aud = arr[0]
+			}
+		}
+	}
+	return c
 }
