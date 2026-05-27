@@ -65,6 +65,10 @@ func (j *jwtSessionLoader) loadSession(next http.Handler) http.Handler {
 			// — no manual decoding needed (MIG-11558).
 			logger.Printf("jwt session loaded: key_id=%s path=%s exp=%v",
 				session.User, req.URL.Path, session.ExpiresOn)
+
+			// Record the (key_id, exp) for distinct-token counting in metrics.
+			// Bounded + expiring; see descope_token_metrics.go (MIG-11558).
+			descopeTokens.record(session.User, session.ExpiresOn)
 		}
 
 		// Add the session to the scope if it was found
