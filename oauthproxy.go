@@ -113,7 +113,7 @@ type OAuthProxy struct {
 	redirectValidator redirect.Validator
 	appDirector       redirect.AppDirector
 
-	encodeState bool
+	encodeState       bool
 	tokenRelayHandler http.Handler
 }
 
