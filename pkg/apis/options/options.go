@@ -72,6 +72,12 @@ type Options struct {
 	SignatureKey    string `flag:"signature-key" cfg:"signature_key"`
 	GCPHealthChecks bool   `flag:"gcp-healthchecks" cfg:"gcp_healthchecks"`
 
+	// TokenRelayUpstreamURL, when set, enables a /oauth2/token/relay endpoint
+	// that caches client-credentials tokens in Redis. All nodes share one cached
+	// token per client_id instead of each calling the upstream endpoint.
+	// Requires --session-store-type=redis.
+	TokenRelayUpstreamURL string `flag:"token-relay-upstream-url" cfg:"token_relay_upstream_url"`
+
 	// This is used for backwards compatibility for basic auth users
 	LegacyPreferEmailToUser bool `cfg:",internal"`
 
@@ -166,6 +172,7 @@ func NewFlagSet() *pflag.FlagSet {
 	flagSet.Int("redis-connection-idle-timeout", 0, "Redis connection idle timeout seconds, if Redis timeout option is non-zero, the --redis-connection-idle-timeout must be less then Redis timeout option")
 	flagSet.String("signature-key", "", "GAP-Signature request signature key (algorithm:secretkey)")
 	flagSet.Bool("gcp-healthchecks", false, "Enable GCP/GKE healthcheck endpoints")
+	flagSet.String("token-relay-upstream-url", "", "upstream token endpoint URL for the /oauth2/token/relay cache; requires --session-store-type=redis")
 	flagSet.Duration("shutdown-duration", 0, "Amount of time to continue serving traffic after receiving an exit signal with readiness endpoint set to false.")
 
 	flagSet.AddFlagSet(cookieFlagSet())

@@ -34,6 +34,7 @@ import (
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/middleware"
 	requestutil "github.com/oauth2-proxy/oauth2-proxy/v7/pkg/requests/util"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/sessions"
+	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/tokenrelay"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/pkg/upstream"
 	"github.com/oauth2-proxy/oauth2-proxy/v7/providers"
 )
@@ -51,6 +52,7 @@ const (
 	authOnlyPath      = "/auth"
 	userInfoPath      = "/userinfo"
 	staticPathPrefix  = "/static/"
+	tokenRelayPath    = "/token/relay"
 )
 
 var (
@@ -112,6 +114,7 @@ type OAuthProxy struct {
 	appDirector       redirect.AppDirector
 
 	encodeState bool
+	tokenRelayHandler http.Handler
 }
 
 // NewOAuthProxy creates a new instance of OAuthProxy from the options provided
@@ -248,6 +251,12 @@ func NewOAuthProxy(ctx context.Context, opts *options.Options, validator func(st
 		appDirector:        appDirector,
 		encodeState:        opts.EncodeState,
 	}
+
+	if opts.TokenRelayUpstreamURL != "" {
+		p.tokenRelayHandler = tokenrelay.NewHandler(opts.TokenRelayUpstreamURL)
+		logger.Printf("token relay enabled: upstream=%s path=%s%s", opts.TokenRelayUpstreamURL, opts.ProxyPrefix, tokenRelayPath)
+	}
+
 	p.buildServeMux(opts.ProxyPrefix)
 
 	if err := p.setupServer(opts); err != nil {
@@ -338,6 +347,10 @@ func (p *OAuthProxy) buildProxySubrouter(s *mux.Router) {
 	// The userinfo and logout endpoints needs to load sessions before handling the request
 	s.Path(userInfoPath).Handler(p.sessionChain.ThenFunc(p.UserInfo))
 	s.Path(signOutPath).Handler(p.sessionChain.ThenFunc(p.SignOut))
+
+	if p.tokenRelayHandler != nil {
+		s.Path(tokenRelayPath).Handler(p.tokenRelayHandler)
+	}
 }
 
 // buildPreAuthChain constructs a chain that should process every request before
