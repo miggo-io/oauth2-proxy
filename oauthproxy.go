@@ -415,7 +415,9 @@ func buildSessionChain(opts *options.Options, provider providers.Provider, sessi
 }
 
 func buildHeadersChain(opts *options.Options) (alice.Chain, error) {
-	requestInjector, err := middleware.NewRequestHeaderInjector(opts.InjectRequestHeaders)
+	requestHeaders := append([]options.Header{}, opts.InjectRequestHeaders...)
+	requestHeaders = append(requestHeaders, miggoIdentityHeaders()...)
+	requestInjector, err := middleware.NewRequestHeaderInjector(requestHeaders)
 	if err != nil {
 		return alice.Chain{}, fmt.Errorf("error constructing request header injector: %v", err)
 	}
@@ -426,6 +428,25 @@ func buildHeadersChain(opts *options.Options) (alice.Chain, error) {
 	}
 
 	return alice.New(requestInjector, responseInjector), nil
+}
+
+// miggoIdentityHeaders forwards the tenant/project JWT claims to upstreams as
+// X-Auth-Request-* headers, matching the gateway's claim-to-header mapping.
+func miggoIdentityHeaders() []options.Header {
+	return []options.Header{
+		{
+			Name: "X-Auth-Request-Tenant-Id",
+			Values: []options.HeaderValue{
+				{ClaimSource: &options.ClaimSource{Claim: "dct"}},
+			},
+		},
+		{
+			Name: "X-Auth-Request-Project-Id",
+			Values: []options.HeaderValue{
+				{ClaimSource: &options.ClaimSource{Claim: "project_id"}},
+			},
+		},
+	}
 }
 
 func buildSignInMessage(opts *options.Options) string {

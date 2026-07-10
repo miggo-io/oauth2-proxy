@@ -29,6 +29,10 @@ type SessionState struct {
 	Groups            []string `msgpack:"g,omitempty"`
 	PreferredUsername string   `msgpack:"pu,omitempty"`
 
+	// Extra holds non-standard token claims keyed by claim name, so GetClaim
+	// can surface them (e.g. for header injection).
+	Extra map[string][]string `msgpack:"x,omitempty"`
+
 	// Internal helpers, not serialized
 	Clock clock.Clock `msgpack:"-"`
 	Lock  Lock        `msgpack:"-"`
@@ -149,6 +153,9 @@ func (s *SessionState) GetClaim(claim string) []string {
 	case "preferred_username":
 		return []string{s.PreferredUsername}
 	default:
+		if v, ok := s.Extra[claim]; ok {
+			return v
+		}
 		return []string{}
 	}
 }

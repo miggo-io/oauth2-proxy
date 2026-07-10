@@ -119,6 +119,30 @@ var _ = Describe("Injector Suite", func() {
 				},
 				expectedErr: nil,
 			}),
+			Entry("with a claim valued header sourced from session Extra", newInjectorTableInput{
+				headers: []options.Header{
+					{
+						Name: "X-Auth-Request-Tenant-Id",
+						Values: []options.HeaderValue{
+							{
+								ClaimSource: &options.ClaimSource{
+									Claim: "dct",
+								},
+							},
+						},
+					},
+				},
+				initialHeaders: http.Header{},
+				session: &sessionsapi.SessionState{
+					Extra: map[string][]string{
+						"dct": {"tenant-1"},
+					},
+				},
+				expectedHeaders: http.Header{
+					"X-Auth-Request-Tenant-Id": []string{"tenant-1"},
+				},
+				expectedErr: nil,
+			}),
 			Entry("with a claim valued header and a nil session", newInjectorTableInput{
 				headers: []options.Header{
 					{

@@ -313,6 +313,45 @@ func TestPassGroupsHeadersWithGroups(t *testing.T) {
 	assert.Equal(t, []string{"a,b"}, req.Header["X-Forwarded-Groups"])
 }
 
+func TestPassMiggoIdentityHeaders(t *testing.T) {
+	opts := baseTestOptions()
+	err := validation.Validate(opts)
+	assert.NoError(t, err)
+
+	const emailAddress = "john.doe@example.com"
+	created := time.Now()
+	session := &sessions.SessionState{
+		User:        "9fcab5c9b889a557",
+		Email:       emailAddress,
+		AccessToken: "oauth_token",
+		CreatedAt:   &created,
+		Extra: map[string][]string{
+			"dct":        {"tenant-1"},
+			"project_id": {"project-1"},
+		},
+	}
+
+	proxy, err := NewOAuthProxy(context.Background(), opts, func(email string) bool {
+		return email == emailAddress
+	})
+	assert.NoError(t, err)
+
+	rw := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/", nil)
+	err = proxy.sessionStore.Save(rw, req, session)
+	assert.NoError(t, err)
+
+	cookie := rw.Header().Values("Set-Cookie")[0]
+
+	req, _ = http.NewRequest("GET", "/", nil)
+	req.Header.Set("Cookie", cookie)
+	rw = httptest.NewRecorder()
+	proxy.ServeHTTP(rw, req)
+
+	assert.Equal(t, []string{"tenant-1"}, req.Header["X-Auth-Request-Tenant-Id"])
+	assert.Equal(t, []string{"project-1"}, req.Header["X-Auth-Request-Project-Id"])
+}
+
 type PassAccessTokenTest struct {
 	providerServer *httptest.Server
 	proxy          *OAuthProxy
