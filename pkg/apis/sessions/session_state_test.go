@@ -292,3 +292,43 @@ func compareSessionStates(t *testing.T, expected *SessionState, actual *SessionS
 	act.ExpiresOn = nil
 	assert.Equal(t, exp, act)
 }
+
+func TestGetClaim(t *testing.T) {
+	g := NewWithT(t)
+	ss := &SessionState{
+		Email: "user@example.com",
+		Extra: map[string][]string{
+			"dct":        {"tenant-1"},
+			"project_id": {"project-1"},
+			"email":      {"shadowed@example.com"},
+		},
+	}
+
+	// Standard claims resolve from their dedicated fields and take precedence over Extra.
+	g.Expect(ss.GetClaim("email")).To(Equal([]string{"user@example.com"}))
+	// Non-standard claims resolve from Extra.
+	g.Expect(ss.GetClaim("dct")).To(Equal([]string{"tenant-1"}))
+	g.Expect(ss.GetClaim("project_id")).To(Equal([]string{"project-1"}))
+	// Unknown claims with no Extra entry resolve to empty.
+	g.Expect(ss.GetClaim("missing")).To(Equal([]string{}))
+}
+
+func TestEncodeDecodePreservesExtra(t *testing.T) {
+	secret := make([]byte, 32)
+	_, err := io.ReadFull(rand.Reader, secret)
+	require.NoError(t, err)
+	c, err := encryption.NewGCMCipher(secret)
+	require.NoError(t, err)
+
+	ss := &SessionState{
+		User:  "username",
+		Extra: map[string][]string{"dct": {"tenant-1"}, "project_id": {"project-1"}},
+	}
+
+	encoded, err := ss.EncodeSessionState(c, false)
+	require.NoError(t, err)
+	decoded, err := DecodeSessionState(encoded, c, false)
+	require.NoError(t, err)
+
+	assert.Equal(t, ss.Extra, decoded.Extra)
+}

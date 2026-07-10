@@ -584,4 +584,46 @@ Nnc3a3lGVWFCNUMxQnNJcnJMTWxka1dFaHluYmI4Ongtb2F1dGgtYmFzaWM=`
 			}),
 		)
 	})
+
+	Context("CreateTokenToSessionFunc with extra claims", func() {
+		It("surfaces non-standard claims via the session", func() {
+			ctx := context.Background()
+			verifier := func(ctx context.Context, token string) (*oidc.IDToken, error) {
+				oidcVerifier := oidc.NewVerifier(
+					"https://issuer.example.com",
+					noOpKeySet{},
+					&oidc.Config{ClientID: "asdf1234"},
+				)
+				return oidcVerifier.Verify(ctx, token)
+			}
+
+			key, err := rsa.GenerateKey(rand.Reader, 2048)
+			Expect(err).ToNot(HaveOccurred())
+
+			claims := struct {
+				Dct       string `json:"dct"`
+				ProjectID string `json:"project_id"`
+				jwt.RegisteredClaims
+			}{
+				Dct:       "tenant-1",
+				ProjectID: "project-1",
+				RegisteredClaims: jwt.RegisteredClaims{
+					Audience:  jwt.ClaimStrings{"asdf1234"},
+					ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+					IssuedAt:  jwt.NewNumericDate(time.Now()),
+					Issuer:    "https://issuer.example.com",
+					Subject:   "123456789",
+				},
+			}
+
+			rawIDToken, err := jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+			Expect(err).ToNot(HaveOccurred())
+
+			session, err := middlewareapi.CreateTokenToSessionFunc(verifier)(ctx, rawIDToken)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(session.GetClaim("dct")).To(Equal([]string{"tenant-1"}))
+			Expect(session.GetClaim("project_id")).To(Equal([]string{"project-1"}))
+			Expect(session.User).To(Equal("123456789"))
+		})
+	})
 })

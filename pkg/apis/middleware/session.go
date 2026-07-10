@@ -55,6 +55,42 @@ func CreateTokenToSessionFunc(verify VerifyFunc) TokenToSessionFunc {
 			ExpiresOn:         &idToken.Expiry,
 		}
 
+		var rawClaims map[string]any
+		if err := idToken.Claims(&rawClaims); err != nil {
+			return nil, fmt.Errorf("failed to parse bearer token claims: %v", err)
+		}
+		if extra := extraClaims(rawClaims); len(extra) > 0 {
+			newSession.Extra = extra
+		}
+
 		return newSession, nil
 	}
+}
+
+// miggoIdentityClaims are the non-standard JWT claims captured onto the session
+// so SessionState.GetClaim can surface them for header injection.
+var miggoIdentityClaims = []string{"dct", "project_id"}
+
+// extraClaims collects the string-valued identity claims present in raw.
+func extraClaims(raw map[string]any) map[string][]string {
+	extra := map[string][]string{}
+	for _, name := range miggoIdentityClaims {
+		switch v := raw[name].(type) {
+		case string:
+			if v != "" {
+				extra[name] = []string{v}
+			}
+		case []any:
+			strs := make([]string, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					strs = append(strs, s)
+				}
+			}
+			if len(strs) > 0 {
+				extra[name] = strs
+			}
+		}
+	}
+	return extra
 }
